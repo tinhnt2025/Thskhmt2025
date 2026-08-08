@@ -1,0 +1,44 @@
+import sys, torch
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+from LNL import LNL_Ti
+
+# ===== ĐƯỜNG DẪN =====
+CKPT = '/content/drive/MyDrive/LNL_Checkpoint/checkpoint.pth'
+TEST_DIR = '/content/data/GTSRB/test'
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Transform giống lúc train
+tf = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.3403,0.3121,0.3214],
+                         [0.2724,0.2608,0.2669])
+])
+
+test_loader = DataLoader(
+    datasets.ImageFolder(TEST_DIR, transform=tf),
+    batch_size=64, shuffle=False, num_workers=2
+)
+
+# Model
+model = LNL_Ti(pretrained=False)
+model.head = torch.nn.Linear(192, 43)
+
+ckpt = torch.load(CKPT, map_location=device)
+model.load_state_dict(ckpt['model_state_dict'])
+model.to(device).eval()
+
+# Test clean accuracy
+correct = total = 0
+
+with torch.no_grad():
+    for x, y in test_loader:
+        x, y = x.to(device), y.to(device)
+        pred = model(x).argmax(1)
+
+        correct += (pred == y).sum().item()
+        total += y.size(0)
+
+print(f'Accuracy: {100*correct/total:.2f}% ({correct}/{total})')

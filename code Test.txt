@@ -1,0 +1,58 @@
+
+import torch.nn.functional as F
+
+# Xác định thiết bị tự động (GPU nếu có, không thì CPU)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Sử dụng model_eval đã được nạp trọng số thành công ở ô trên
+model_eval = model_eval.to(device)
+model_eval.eval()
+
+print(f"Using loaded LNL_Ti model for TTA evaluation on: {device}")
+
+# Test-Time Augmentation
+tta_transforms = [
+    test_transform,
+    transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomRotation(5),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=GTSRB_MEAN, std=GTSRB_STD),
+    ]),
+    transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=GTSRB_MEAN, std=GTSRB_STD),
+    ]),
+]
+
+# Đảm bảo đường dẫn chính xác (đã verify ở các bước trước)
+base_test_path = '/content/data/GTSRB/test'
+base_testset = torchvision.datasets.ImageFolder(root=base_test_path)
+sample_labels = torch.tensor([label for _, label in base_testset.samples])
+num_classes = len(base_testset.classes)
+
+all_probs = torch.zeros(len(sample_labels), num_classes)
+
+with torch.no_grad():
+    for tform in tta_transforms:
+        tta_testset = torchvision.datasets.ImageFolder(root=base_test_path, transform=tform)
+        tta_loader = torch.utils.data.DataLoader(tta_testset, batch_size=batch_size,
+                                                 shuffle=False, num_workers=2,
+                                                 pin_memory=torch.cuda.is_available())
+        probs_list = []
+        for images, _ in tta_loader:
+            images = images.to(device)
+            outputs = model_eval(images)
+            probs = F.softmax(outputs, dim=1)
+            probs_list.append(probs.cpu())
+        all_probs += torch.cat(probs_list, dim=0)
+
+predicted = all_probs.argmax(dim=1)
+correct = (predicted == sample_labels).sum().item()
+total = len(sample_labels)
+
+print('Standard accuracy (TTA): %.2f %%' % (100 * float(correct) / total))
+Using loaded LNL_Ti model for TTA evaluation on: cuda
+Standard accuracy (TTA): 99.47 %
